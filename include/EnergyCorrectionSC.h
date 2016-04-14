@@ -62,14 +62,20 @@ private:
      */
     pandora::StatusCode SCHCalECalSplitClusterEnergyCorrectionFunction(float clusterEnergyEstimation, const pandora::CaloHitList &caloHitList, float &energyCorrection) const;
 
-    pandora::FloatVector          m_SCEnergyConstants1;            //
-    pandora::FloatVector          m_SCEnergyConstants2;            //
-    bool                          m_cheating;  
-    float                         m_trueEnergy;
+    pandora::FloatVector    m_SCEnergyConstants1;                 //
+    pandora::FloatVector    m_SCEnergyConstants2;                 //
+    bool                    m_cutClusterHadEnergy;                // Flag to apply cluster energy cut
+    float                   m_clusterMinHadEnergy;                // Minimum hadronic energy for a cluster to apply software compensation to  
+    bool                    m_cutNumberOfHitsInCluster;           // Flag to apply number of hits cut
+    int                     m_minNumberOfHitsInCluster;           // Minimum number of hits for a cluster to apply software compensation
+    bool                    m_applyOnlyToTrackAssociatedClusters; // Flag to turn on when desire to apply Software Compensation only to cluster with at least one track associated
+    bool                    m_cutCglobal;                         // Flag to apply cut on cluster energy distribution variable
+    float                   m_maxCglobal;                         // Maximum value of cluster energy distribution variable to apply software compensation
+    bool                    m_cutClusterTopologyVariable;         // Flag to apply cluster topology variable cut
+    float                   m_minClusterTopologyVariable;         // Minimum value of cluster topology variable to apply software compensation
 
-    //Lan add to make cluster energy distribution
-    //TFile *fCluster;
-    //TH1F *hClusterE;
+    bool                    m_cheating;                           // Flag for cheating 
+    float                   m_trueEnergy;                         // Cheating: for single particle samples one can give true particle energy
 
 };
 

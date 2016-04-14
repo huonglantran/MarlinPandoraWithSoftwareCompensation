@@ -11,26 +11,27 @@
 #include "EnergyCorrectionSC.h"
 #include "PandoraPFANewProcessor.h"
 
-//#include "TFile.h"
-//#include "TH1F.h"
-//#include "TTree.h"
-
 using namespace pandora;
 
 EnergyCorrectionSC::EnergyCorrectionSC() :
   m_SCEnergyConstants1(NULL),
-  m_SCEnergyConstants2(NULL)
+  m_SCEnergyConstants2(NULL),
+  m_cutClusterHadEnergy(false),
+  m_clusterMinHadEnergy(10.f),
+  m_cutNumberOfHitsInCluster(false),
+  m_minNumberOfHitsInCluster(5),
+  m_applyOnlyToTrackAssociatedClusters(true),
+  m_cutCglobal(false),
+  m_maxCglobal(5.f),
+  m_cutClusterTopologyVariable(false),
+  m_minClusterTopologyVariable(0.f)
 {
-  //fCluster = new TFile("ClusterInfo.root","recreate");
-  //hClusterE = new TH1F("clusterEnergy", "clusterEnergy", 100, 0, 100);
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode EnergyCorrectionSC::MakeEnergyCorrections(const pandora::Cluster *const pCluster, float &correctedHadronicEnergy) const
 {
-  //std::cout << "Starts EnergyCorrectionSC" << std::endl;
-
     if(NULL == pCluster)
         throw pandora::StatusCodeException(pandora::STATUS_CODE_INVALID_PARAMETER);
 
@@ -51,141 +52,98 @@ StatusCode EnergyCorrectionSC::MakeEnergyCorrections(const pandora::Cluster *con
     pandora::CaloHitList clusterCaloHitList;
     clusterCaloHitList.insert(nonIsolatedCaloHitList.begin(), nonIsolatedCaloHitList.end());
     clusterCaloHitList.insert(isolatedCaloHitList.begin(), isolatedCaloHitList.end());
-    
+
     //Cluster important information
-    float clusterHADenergy = pCluster->GetHadronicEnergy();
-    //const unsigned int nHitsInCluster(pCluster->GetNCaloHits());    
-    //pandora::CaloHitList clusterCaloHitList;
-    //pCluster->GetOrderedCaloHitList().GetCaloHitList(clusterCaloHitList);
+    float clusterHadEnergy = pCluster->GetHadronicEnergy();//Already includes energy of isolated hits
+    const unsigned int nHitsInCluster(clusterCaloHitList.size());    
+    const pandora::TrackList &trackList = pCluster->GetAssociatedTrackList();
+    const unsigned int nTrackAssociations = trackList.size();
 
-    //if (5>= nHitsInCluster)
-    //return STATUS_CODE_SUCCESS;
+    if (m_cutClusterHadEnergy && clusterHadEnergy < m_clusterMinHadEnergy)
+      return STATUS_CODE_SUCCESS;
+    
+    if (m_cutNumberOfHitsInCluster && nHitsInCluster < m_minNumberOfHitsInCluster)
+      return STATUS_CODE_SUCCESS;
 
-    //const pandora::TrackList &trackList = pCluster->GetAssociatedTrackList();
-    //const unsigned int nTrackAssociations = trackList.size();
+    if (m_applyOnlyToTrackAssociatedClusters && (0 == nTrackAssociations))
+      return STATUS_CODE_SUCCESS;
 
-    //std::cout << "nTrackAssociations " << nTrackAssociations << std::endl;
+    //C_global distribution
+    int N_lim(0), N_av(0);
+    float maxDiff(std::numeric_limits<float>::min());
+    float maxHitEnergy(std::numeric_limits<float>::min());
+    float minHitEnergy(std::numeric_limits<float>::max());
+    const int numberCaloHits(clusterCaloHitList.size());
+    const float meanHitEnergy(clusterHadEnergy/numberCaloHits);
+    std::vector<float> clusterHitEnergy;
+    
+    for(pandora::CaloHitList::const_iterator iter = clusterCaloHitList.begin() , endIter = clusterCaloHitList.end() ; endIter != iter ; ++iter)
+    {
+      const pandora::CaloHit *pCaloHit = *iter;
+        const float hitEnergy = pCaloHit->GetHadronicEnergy();
+        const float hitEnergyinMIP = pCaloHit->GetMipEquivalentEnergy();
+        clusterHitEnergy.push_back(hitEnergy);
+   
+        if (fabs(hitEnergy-meanHitEnergy)>maxDiff)
+        {
+            maxDiff = fabs(hitEnergy-meanHitEnergy);
+        }
 
-    //if (0 == nTrackAssociations){
-    //std::cout << "no track associated" << std::endl;
-    //return STATUS_CODE_SUCCESS;
-    //}
+        if (hitEnergy>maxHitEnergy)
+        {
+            maxHitEnergy = hitEnergy;
+        }
+
+        if (hitEnergy<minHitEnergy)
+        {
+            minHitEnergy = hitEnergy;
+        }
+
+        if (hitEnergy<meanHitEnergy)
+        {
+            N_av++;
+        }
+
+        if (hitEnergyinMIP<5.)
+        {
+            N_lim++;
+        }
+    }
+   
+    float C_global(0.f);
+
+    if (N_av==0)
+    {
+        return STATUS_CODE_SUCCESS;
+    }
+    else
+    {
+        C_global = (float)N_lim/N_av;
+    }
+
+    if (m_cutCglobal && C_global > m_maxCglobal)
+      return STATUS_CODE_SUCCESS;
+
+    float clusterTopologyVariable = maxDiff/(maxHitEnergy-minHitEnergy);
+    if (m_cutClusterTopologyVariable && clusterTopologyVariable < m_minClusterTopologyVariable)
+      return STATUS_CODE_SUCCESS;
+
+
+    std::cout << "Software Compensation Doing Something At Clustering" << std::endl;
 
     //Here to check the cluster type so that the corresponding correction function is called
     bool isHCalCluster(false), isECalCluster(false);
     
-    //std::cout << "The hadronic energy for this cluster is:" << pCluster->GetHadronicEnergy() << std::endl;
-
-    //C_global distribution
-    float meanHitEnergy = pCluster->GetHadronicEnergy()/clusterCaloHitList.size();
-    //std::cout << "clusterEnergy " << pCluster->GetHadronicEnergy() << " ncalohits " << clusterCaloHitList.size() << " meanHitEnergy " << meanHitEnergy << std::endl;
-    //std::cout << "isolated had e " << pCluster->GetIsolatedHadronicEnergy() << std::endl;
-
-    int N_lim = 0, N_av = 0;
-    float maxDiff = -1e6;
-    float maxHitEnergy = -1e6;
-    float minHitEnergy = 1e6;
-    float sumEhit = 0;
-    std::vector<float> clusterHitEnergy;
-    for(pandora::CaloHitList::const_iterator iter = clusterCaloHitList.begin() , endIter = clusterCaloHitList.end() ; endIter != iter ; ++iter)
-      {
-	const pandora::CaloHit *pCaloHit = *iter;
-	float hitEnergy = pCaloHit->GetHadronicEnergy();
-	float hitEnergyinMIP = pCaloHit->GetMipEquivalentEnergy();
-	clusterHitEnergy.push_back(hitEnergy);
-	
-	sumEhit += hitEnergy;
-	
-	//std::cout << "hitEnergy " << hitEnergy << " hitEnergyinMIP " << hitEnergyinMIP << std::endl;
-	
-	if (fabs(hitEnergy-meanHitEnergy)>maxDiff)
-	  maxDiff = fabs(hitEnergy-meanHitEnergy);
-	if (hitEnergy>maxHitEnergy)
-	  maxHitEnergy = hitEnergy;
-	if (hitEnergy<minHitEnergy)
-	  minHitEnergy = hitEnergy;
-	
-	//std::cout << "fabs(hitEnergy-meanHitEnergy) " << fabs(hitEnergy-meanHitEnergy) << " maxDiff " << maxDiff << std::endl;
-	//std::cout << "maxHitEnergy " << maxHitEnergy << std::endl;
-	
-	if (hitEnergy<meanHitEnergy)
-	  N_av++;
-	if (hitEnergyinMIP<5.)
-	  N_lim++;
-      }
-    
-    //std::cout << "N_av " << N_av << " N_lim " << N_lim << std::endl;
-
-    float C_global(0.f);
-    if (N_av==0)
-      return STATUS_CODE_SUCCESS;
-    else
-      C_global = (float)N_lim/N_av;
-
-    if (clusterHADenergy<3)
-      return STATUS_CODE_SUCCESS;
-    
-    if (C_global>2 || (maxDiff/(maxHitEnergy-minHitEnergy))<0.3 )
-      return STATUS_CODE_SUCCESS;
-
-    /*
-    if (clusterHADenergy<10){//Scale hot hadrons
-      float m_minHitsForHotHadron(5),
-	m_maxHitsForHotHadron(100),
-	m_hotHadronInnerLayerCut(10),
-	m_hotHadronMipFractionCut(0.4),
-	m_hotHadronNHitsCut(50),
-	m_hotHadronMipsPerHit(15.f),
-	m_scaledHotHadronMipsPerHit(5.f);
-    
-      // Initial hot hadron cuts
-      if ((nHitsInCluster < m_minHitsForHotHadron) || (nHitsInCluster > m_maxHitsForHotHadron))
-	return STATUS_CODE_SUCCESS;
-      
-      if ((pCluster->GetInnerPseudoLayer() < m_hotHadronInnerLayerCut) && (pCluster->GetMipFraction() < m_hotHadronMipFractionCut) &&
-	  (nHitsInCluster > m_hotHadronNHitsCut))
-	{
-	  return STATUS_CODE_SUCCESS;
-	}
-      
-      // Finally, check the number of mips per hit
-      float clusterMipEnergy(0.);
-      const OrderedCaloHitList &orderedCaloHitList(pCluster->GetOrderedCaloHitList());
-      
-      for (OrderedCaloHitList::const_iterator layerIter = orderedCaloHitList.begin(), layerIterEnd = orderedCaloHitList.end();
-	   layerIter != layerIterEnd; ++layerIter)
-	{
-	  for (CaloHitList::const_iterator hitIter = layerIter->second->begin(), hitIterEnd = layerIter->second->end();
-	       hitIter != hitIterEnd; ++hitIter)
-	    {
-	      clusterMipEnergy += (*hitIter)->GetMipEquivalentEnergy();
-	    }
-	}
-      
-      const float meanMipsPerHit(clusterMipEnergy / static_cast<float>(nHitsInCluster));
-      
-      if ((meanMipsPerHit > 0.f) && (meanMipsPerHit > m_hotHadronMipsPerHit))
-	correctedHadronicEnergy *= m_scaledHotHadronMipsPerHit / meanMipsPerHit;
-      
-      return STATUS_CODE_SUCCESS;
-    }
-    */
-
-
     this->clusterType(clusterCaloHitList, isECalCluster, isHCalCluster);
 
     if (isECalCluster)
-    {
-        //EnergyCorrectionSC::ECalClusterEnergyCorrectionFunction(clusterCaloHitList, correctedHadronicEnergy);
-        return STATUS_CODE_SUCCESS;
-    }
-
+      return STATUS_CODE_SUCCESS;
+    
     else if (isHCalCluster){
-      EnergyCorrectionSC::SCClusterEnergyCorrectionFunction(clusterHADenergy,clusterCaloHitList, correctedHadronicEnergy);
-      //hClusterE->Fill(clusterHADenergy);
+      EnergyCorrectionSC::SCClusterEnergyCorrectionFunction(clusterHadEnergy,clusterCaloHitList, correctedHadronicEnergy);
     }
     else
-      EnergyCorrectionSC::SCHCalECalSplitClusterEnergyCorrectionFunction(clusterHADenergy,clusterCaloHitList, correctedHadronicEnergy);
+      EnergyCorrectionSC::SCHCalECalSplitClusterEnergyCorrectionFunction(clusterHadEnergy,clusterCaloHitList, correctedHadronicEnergy);
     
     return STATUS_CODE_SUCCESS;
 
@@ -277,16 +235,6 @@ StatusCode EnergyCorrectionSC::SCClusterEnergyCorrectionFunction(float clusterEn
 {
     //std::cout << "========HCAL CONTAINED CLUSTER========" << std::endl;
 
-    //std::cout << "m_SCEnergyConstants.at(0) : " << m_SCEnergyConstants.at(0) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(1) : " << m_SCEnergyConstants.at(1) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(2) : " << m_SCEnergyConstants.at(2) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(3) : " << m_SCEnergyConstants.at(3) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(4) : " << m_SCEnergyConstants.at(4) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(5) : " << m_SCEnergyConstants.at(5) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(6) : " << m_SCEnergyConstants.at(6) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(7) : " << m_SCEnergyConstants.at(7) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(8) : " << m_SCEnergyConstants.at(8) << std::endl;
-
   //std::cout << "Energy correction for neutral hadron clusters: clusterEnergyEstimation " << clusterEnergyEstimation << std::endl;
   
   float E_SC(0.f);
@@ -363,16 +311,6 @@ StatusCode EnergyCorrectionSC::SCHCalECalSplitClusterEnergyCorrectionFunction(fl
 {
 
     //std::cout << "========SPLIT CLUSTER========" << std::endl;
-
-    //std::cout << "m_SCEnergyConstants.at(0) : " << m_SCEnergyConstants.at(0) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(1) : " << m_SCEnergyConstants.at(1) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(2) : " << m_SCEnergyConstants.at(2) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(3) : " << m_SCEnergyConstants.at(3) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(4) : " << m_SCEnergyConstants.at(4) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(5) : " << m_SCEnergyConstants.at(5) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(6) : " << m_SCEnergyConstants.at(6) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(7) : " << m_SCEnergyConstants.at(7) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(8) : " << m_SCEnergyConstants.at(8) << std::endl;
 
   float E_SC(0.f);
 
@@ -470,20 +408,33 @@ StatusCode EnergyCorrectionSC::ReadSettings(const TiXmlHandle xmlHandle)
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
         "TrueEnergy", m_trueEnergy));
 
-    //std::cout << "====== Read Settings =====" << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(0) : " << m_SCEnergyConstants.at(0) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(1) : " << m_SCEnergyConstants.at(1) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(2) : " << m_SCEnergyConstants.at(2) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(3) : " << m_SCEnergyConstants.at(3) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(4) : " << m_SCEnergyConstants.at(4) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(5) : " << m_SCEnergyConstants.at(5) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(6) : " << m_SCEnergyConstants.at(6) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(7) : " << m_SCEnergyConstants.at(7) << std::endl;
-    //std::cout << "m_SCEnergyConstants.at(8) : " << m_SCEnergyConstants.at(8) << std::endl;
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "CutClusterHadEnergy", m_cutClusterHadEnergy));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "ClusterMinHadEnergy", m_clusterMinHadEnergy));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "CutNumberOfHitsInCluster", m_cutNumberOfHitsInCluster));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "MinNumberOfHitsInCluster", m_minNumberOfHitsInCluster));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "ApplyOnlyToTrackAssociatedClusters", m_applyOnlyToTrackAssociatedClusters));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "CutCglobal", m_cutCglobal));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "maxCglobal", m_maxCglobal));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "CutClusterTopologyVariable", m_cutClusterTopologyVariable));
+
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+        "MinClusterTopologyVariable", m_minClusterTopologyVariable));
 
     return STATUS_CODE_SUCCESS;
 }
-
-//I =1; J = 2, K = 12
-//I = 1; j = 15; k = 12
 
