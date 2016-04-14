@@ -1,0 +1,47 @@
+K 25
+svn:wc:ra_dav:version-url
+V 68
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src
+END
+GeometryCreator.cc
+K 25
+svn:wc:ra_dav:version-url
+V 87
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src/GeometryCreator.cc
+END
+CaloHitCreator.cc
+K 25
+svn:wc:ra_dav:version-url
+V 86
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src/CaloHitCreator.cc
+END
+MCParticleCreator.cc
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src/MCParticleCreator.cc
+END
+PfoCreator.cc
+K 25
+svn:wc:ra_dav:version-url
+V 82
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src/PfoCreator.cc
+END
+TrackCreator.cc
+K 25
+svn:wc:ra_dav:version-url
+V 84
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src/TrackCreator.cc
+END
+PandoraPFANewProcessor.cc
+K 25
+svn:wc:ra_dav:version-url
+V 94
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src/PandoraPFANewProcessor.cc
+END
+ExternalClusteringAlgorithm.cc
+K 25
+svn:wc:ra_dav:version-url
+V 99
+/public/PandoraPFANew/!svn/ver/1927/MarlinPandora/tags/v02-00-00/src/ExternalClusteringAlgorithm.cc
+END
