@@ -1,4 +1,3 @@
-
 /**
  *  @file   MarlinPandoraSC/src/EnergyCorrectionSC.cc
  * 
@@ -14,17 +13,10 @@
 using namespace pandora;
 
 EnergyCorrectionSC::EnergyCorrectionSC() :
-  m_SCEnergyConstants1(NULL),
-  m_SCEnergyConstants2(NULL),
-  m_cutClusterHadEnergy(false),
   m_clusterMinHadEnergy(10.f),
-  m_cutNumberOfHitsInCluster(false),
-  m_minNumberOfHitsInCluster(5),
-  m_applyOnlyToTrackAssociatedClusters(true),
-  m_cutCglobal(false),
-  m_maxCglobal(5.f),
-  m_cutClusterTopologyVariable(false),
-  m_minClusterTopologyVariable(0.f)
+  m_minCleanHitEnergy(1.f),
+  m_minCleanHitEnergyFraction(0.2f),
+  m_minCleanCorrectedHitEnergy(0.2f)
 {
 }
 
@@ -32,15 +24,33 @@ EnergyCorrectionSC::EnergyCorrectionSC() :
 
 StatusCode EnergyCorrectionSC::MakeEnergyCorrections(const pandora::Cluster *const pCluster, float &correctedHadronicEnergy) const
 {
-    if(NULL == pCluster)
+    if (NULL == pCluster)
         throw pandora::StatusCodeException(pandora::STATUS_CODE_INVALID_PARAMETER);
 
-    if(0 == pCluster->GetNCaloHits())
-      {
+    if (0 == pCluster->GetNCaloHits())
+    {
         correctedHadronicEnergy = 0.f;
         return STATUS_CODE_SUCCESS;
-      }
+    }
 
+    const float clusterHadEnergy = pCluster->GetHadronicEnergy();
+
+    if (clusterHadEnergy < m_clusterMinHadEnergy)
+    {
+        return STATUS_CODE_SUCCESS;
+    }
+
+//    const pandora::TrackList &trackList = pCluster->GetAssociatedTrackList();
+//    const unsigned int nTrackAssociations = trackList.size();
+
+//    if (0 == nTrackAssociations)
+//    {
+//        return STATUS_CODE_SUCCESS;
+//    }
+
+    //Here to check the cluster type so that the corresponding correction function is called
+    bool isHCalCluster(false), isECalCluster(false);
+    
     // PFO only has the nonIsolated calo hits associated to it.  Topologically this is right, but the energy of the
     // isolated hits is used in PFO creation.
     const pandora::OrderedCaloHitList &orderedCaloHitList(pCluster->GetOrderedCaloHitList());
@@ -52,23 +62,7 @@ StatusCode EnergyCorrectionSC::MakeEnergyCorrections(const pandora::Cluster *con
     pandora::CaloHitList clusterCaloHitList;
     clusterCaloHitList.insert(nonIsolatedCaloHitList.begin(), nonIsolatedCaloHitList.end());
     clusterCaloHitList.insert(isolatedCaloHitList.begin(), isolatedCaloHitList.end());
-
-    //Cluster important information
-    float clusterHadEnergy = pCluster->GetHadronicEnergy();//Already includes energy of isolated hits
-    const unsigned int nHitsInCluster(clusterCaloHitList.size());    
-    const pandora::TrackList &trackList = pCluster->GetAssociatedTrackList();
-    const unsigned int nTrackAssociations = trackList.size();
-
-    if (m_cutClusterHadEnergy && clusterHadEnergy < m_clusterMinHadEnergy)
-      return STATUS_CODE_SUCCESS;
-    
-    if (m_cutNumberOfHitsInCluster && nHitsInCluster < m_minNumberOfHitsInCluster)
-      return STATUS_CODE_SUCCESS;
-
-    if (m_applyOnlyToTrackAssociatedClusters && (0 == nTrackAssociations))
-      return STATUS_CODE_SUCCESS;
-
-    //C_global distribution
+/*
     int N_lim(0), N_av(0);
     float maxDiff(std::numeric_limits<float>::min());
     float maxHitEnergy(std::numeric_limits<float>::min());
@@ -76,10 +70,10 @@ StatusCode EnergyCorrectionSC::MakeEnergyCorrections(const pandora::Cluster *con
     const int numberCaloHits(clusterCaloHitList.size());
     const float meanHitEnergy(clusterHadEnergy/numberCaloHits);
     std::vector<float> clusterHitEnergy;
-    
+
     for(pandora::CaloHitList::const_iterator iter = clusterCaloHitList.begin() , endIter = clusterCaloHitList.end() ; endIter != iter ; ++iter)
     {
-      const pandora::CaloHit *pCaloHit = *iter;
+        const pandora::CaloHit *pCaloHit = *iter;
         const float hitEnergy = pCaloHit->GetHadronicEnergy();
         const float hitEnergyinMIP = pCaloHit->GetMipEquivalentEnergy();
         clusterHitEnergy.push_back(hitEnergy);
@@ -121,61 +115,140 @@ StatusCode EnergyCorrectionSC::MakeEnergyCorrections(const pandora::Cluster *con
         C_global = (float)N_lim/N_av;
     }
 
-    if (m_cutCglobal && C_global > m_maxCglobal)
-      return STATUS_CODE_SUCCESS;
-
-    float clusterTopologyVariable = maxDiff/(maxHitEnergy-minHitEnergy);
-    if (m_cutClusterTopologyVariable && clusterTopologyVariable < m_minClusterTopologyVariable)
-      return STATUS_CODE_SUCCESS;
-
+    if (C_global>=1.2 || maxDiff/(maxHitEnergy-minHitEnergy)<0.8 )
+    {
+        return STATUS_CODE_SUCCESS;
+    }
 
     std::cout << "Software Compensation Doing Something At Clustering" << std::endl;
-
-    //Here to check the cluster type so that the corresponding correction function is called
-    bool isHCalCluster(false), isECalCluster(false);
-    
+*/
     this->clusterType(clusterCaloHitList, isECalCluster, isHCalCluster);
 
     if (isECalCluster)
-      return STATUS_CODE_SUCCESS;
-    
-    else if (isHCalCluster){
-      EnergyCorrectionSC::SCClusterEnergyCorrectionFunction(clusterHadEnergy,clusterCaloHitList, correctedHadronicEnergy);
+    {
+        std::cout << "ECal Cluster" << std::endl;
+        this->CleanCluster(pCluster, correctedHadronicEnergy);
+        return STATUS_CODE_SUCCESS;
+    }
+    else if (isHCalCluster)
+    {
+        std::cout << "HCal Cluster" << std::endl;
+        this->SCClusterEnergyCorrectionFunction(clusterHadEnergy,clusterCaloHitList, correctedHadronicEnergy);
     }
     else
-      EnergyCorrectionSC::SCHCalECalSplitClusterEnergyCorrectionFunction(clusterHadEnergy,clusterCaloHitList, correctedHadronicEnergy);
-    
+    {
+        std::cout << "Split Cluster" << std::endl;
+        this->SCHCalECalSplitClusterEnergyCorrectionFunction(clusterHadEnergy,clusterCaloHitList, correctedHadronicEnergy);
+        this->CleanCluster(pCluster, correctedHadronicEnergy);
+    }
+
     return STATUS_CODE_SUCCESS;
-
 }
-
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-StatusCode EnergyCorrectionSC::FindDensity(const pandora::CaloHit *pCaloHit, float &hitBinDensity) const
+StatusCode EnergyCorrectionSC::CleanCluster(const pandora::Cluster *const pCluster, float &correctedHadronicEnergy) const
 {
-  float hitEnergy = pCaloHit->GetHadronicEnergy();
-  //float hitEnergyInMIP = pCaloHit->GetMipEquivalentEnergy();
-  //float mip2gev = hitEnergy/hitEnergyInMIP;
+    const unsigned int firstPseudoLayer(this->GetPandora().GetPlugins()->GetPseudoLayerPlugin()->GetPseudoLayerAtIp());
 
-  float cellvolume = (pCaloHit->GetCellSize0()) * (pCaloHit->GetCellSize1()) * (pCaloHit->GetCellThickness()) /1000000.;
-  float hitEnergyDensity = hitEnergy/cellvolume;
+    const float clusterHadronicEnergy(pCluster->GetHadronicEnergy());
 
-  const int NBIN = 10;
-  //float lowMIP[NBIN]  = {0.3,  2, 5.5,  8, 10, 14, 17, 21, 25, 30};
-  //float highMIP[NBIN] = {  2, 5.5,   8, 10, 14, 17, 21, 25, 30, 1e6};
-  float lowDensity[NBIN]  = {0, 2,   5, 7.5, 9.5, 13, 16,   20, 23.5,  28};
-  float highDensity[NBIN] = {2, 5, 7.5, 9.5,  13, 16, 20, 23.5,   28,  1e6};
+    if (std::fabs(clusterHadronicEnergy) < std::numeric_limits<float>::epsilon())
+        throw StatusCodeException(STATUS_CODE_FAILURE);
 
-  for (int ibin = 0; ibin < NBIN; ibin++){
-    if (hitEnergyDensity>=lowDensity[ibin] && hitEnergyDensity<highDensity[ibin]){
-      hitBinDensity = (lowDensity[ibin]+highDensity[ibin])/2;
-      if (ibin==(NBIN-1))
-	hitBinDensity = 30;    
+    bool isFineGranularity(true);
+    const OrderedCaloHitList &orderedCaloHitList(pCluster->GetOrderedCaloHitList());
+
+    for (OrderedCaloHitList::const_iterator layerIter = orderedCaloHitList.begin(), layerIterEnd = orderedCaloHitList.end(); (layerIter != layerIterEnd) && isFineGranularity; ++layerIter)
+    {
+        const unsigned int pseudoLayer(layerIter->first);
+
+        for (CaloHitList::const_iterator hitIter = layerIter->second->begin(), hitIterEnd = layerIter->second->end(); hitIter != hitIterEnd; ++hitIter)
+        {
+            const CaloHit *const pCaloHit = *hitIter;
+
+            if (ECAL != pCaloHit->GetHitType()) continue;
+
+            if (this->GetPandora().GetGeometry()->GetHitTypeGranularity((*hitIter)->GetHitType()) > FINE)
+            {
+                isFineGranularity = false;
+                break;
+            }
+
+            const float hitHadronicEnergy(pCaloHit->GetHadronicEnergy());
+
+            if ((hitHadronicEnergy > m_minCleanHitEnergy) && (hitHadronicEnergy / clusterHadronicEnergy > m_minCleanHitEnergyFraction))
+            {
+                float energyInPreviousLayer(0.);
+
+                if (pseudoLayer > firstPseudoLayer)
+                    energyInPreviousLayer = this->GetHadronicEnergyInLayer(orderedCaloHitList, pseudoLayer - 1);
+
+                float energyInNextLayer(0.);
+
+                if (pseudoLayer < std::numeric_limits<unsigned int>::max())
+                    energyInNextLayer = this->GetHadronicEnergyInLayer(orderedCaloHitList, pseudoLayer + 1);
+
+                const float energyInCurrentLayer = this->GetHadronicEnergyInLayer(orderedCaloHitList, pseudoLayer);
+                float energyInAdjacentLayers(energyInPreviousLayer + energyInNextLayer);
+
+                if (pseudoLayer > firstPseudoLayer)
+                    energyInAdjacentLayers /= 2.f;
+
+                float newHitHadronicEnergy(energyInAdjacentLayers - energyInCurrentLayer + hitHadronicEnergy);
+                newHitHadronicEnergy = std::max(newHitHadronicEnergy, m_minCleanCorrectedHitEnergy);
+
+                if (newHitHadronicEnergy < hitHadronicEnergy)
+                    correctedHadronicEnergy += newHitHadronicEnergy - hitHadronicEnergy;
+            }
+        }
     }
-  }
 
-  return STATUS_CODE_SUCCESS;
+    return STATUS_CODE_SUCCESS;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+float EnergyCorrectionSC::GetHadronicEnergyInLayer(const OrderedCaloHitList &orderedCaloHitList, const unsigned int pseudoLayer) const
+{
+    OrderedCaloHitList::const_iterator iter = orderedCaloHitList.find(pseudoLayer);
+
+    float hadronicEnergy(0.f);
+
+    if (iter != orderedCaloHitList.end())
+    {
+        for (CaloHitList::const_iterator hitIter = iter->second->begin(), hitIterEnd = iter->second->end(); hitIter != hitIterEnd; ++hitIter)
+        {
+            hadronicEnergy += (*hitIter)->GetHadronicEnergy();
+        }
+    }
+
+    return hadronicEnergy;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode EnergyCorrectionSC::FindDensity(const pandora::CaloHit *const pCaloHit, float &energyDensity) const
+{
+    const int NBIN = 10;
+    float lowDensity[NBIN] = {0, 2, 5, 7.5, 9.5, 13, 16, 20, 23.5, 28};
+    float highDensity[NBIN] = {2, 5, 7.5, 9.5, 13, 16, 20, 23.5, 28, 1e6};
+    const float cellVolume = pCaloHit->GetCellSize0() * pCaloHit->GetCellSize1() * pCaloHit->GetCellThickness() / 1000000;
+    const float hitEnergyHadronic(pCaloHit->GetHadronicEnergy());
+    const float hitEnergyDensity(hitEnergyHadronic/cellVolume);
+
+    for (int ibin = 0; ibin < NBIN; ibin++)
+    {
+        if (hitEnergyDensity >= lowDensity[ibin] && hitEnergyDensity < highDensity[ibin])
+        {
+            energyDensity = (lowDensity[ibin]+highDensity[ibin])/2;
+            if (ibin==(NBIN-1))
+            {
+                energyDensity = 30;
+            }
+        }
+    }
+    return STATUS_CODE_SUCCESS;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -193,10 +266,6 @@ StatusCode EnergyCorrectionSC::clusterType(const pandora::CaloHitList &caloHitLi
 
         else if (ECAL == pCaloHit->GetHitType())
             nECalHits++;
-
-        //std::cout << "pCaloHit->GetHitType():   " << pCaloHit->GetHitType() << std::endl;
-        //std::cout << "nECalHits:                " << nECalHits << std::endl;
-        //std::cout << "nHCalHits:                " << nHCalHits << std::endl;
     }
 
     if (nECalHits != 0 && nHCalHits == 0)
@@ -205,9 +274,6 @@ StatusCode EnergyCorrectionSC::clusterType(const pandora::CaloHitList &caloHitLi
     else if (nHCalHits != 0 && nECalHits == 0)
         isHCalCluster = true;
 
-    //std::cout << "nECalHits:    " << nECalHits << std::endl;
-    //std::cout << "nHCalHits:    " << nHCalHits << std::endl;
-
     return STATUS_CODE_SUCCESS;
 }
 
@@ -215,16 +281,13 @@ StatusCode EnergyCorrectionSC::clusterType(const pandora::CaloHitList &caloHitLi
 
 StatusCode EnergyCorrectionSC::ECalClusterEnergyCorrectionFunction(const pandora::CaloHitList &caloHitList, float &energyCorrection) const
 {
-    std::cout << "========ECAL CONTAINED CLUSTER -> Calling EnergyCorrectionSC::ECalClusterEnergyCorrectionFunction========" << std::endl;
+    //std::cout << "========ECAL CONTAINED CLUSTER========" << std::endl;
 
     for(pandora::CaloHitList::const_iterator iter = caloHitList.begin() , endIter = caloHitList.end() ; endIter != iter ; ++iter)
     {
         const pandora::CaloHit *pCaloHit = *iter;
         energyCorrection += pCaloHit->GetHadronicEnergy();
-        //std::cout << "Calo Hit Energy: " << pCaloHit->GetInputEnergy() << std::endl;
     }
-
-    //std::cout << "energyCorrection:   " << energyCorrection <<std::endl;
 
     return STATUS_CODE_SUCCESS;
 }
@@ -233,75 +296,41 @@ StatusCode EnergyCorrectionSC::ECalClusterEnergyCorrectionFunction(const pandora
 
 StatusCode EnergyCorrectionSC::SCClusterEnergyCorrectionFunction(float clusterEnergyEstimation, const pandora::CaloHitList &caloHitList, float &energyCorrection) const
 {
-    //std::cout << "========HCAL CONTAINED CLUSTER========" << std::endl;
+    std::cout << "========HCAL CONTAINED CLUSTER========" << std::endl;
 
-  //std::cout << "Energy correction for neutral hadron clusters: clusterEnergyEstimation " << clusterEnergyEstimation << std::endl;
-  
-  float E_SC(0.f);
+    float E_SC(0.f);
 
-  float p10 = m_SCEnergyConstants1.at(0);
-  float p11 = m_SCEnergyConstants1.at(1);
-  float p12 = m_SCEnergyConstants1.at(2);
+    float p10 = m_SCEnergyConstants1.at(0);
+    float p11 = m_SCEnergyConstants1.at(1);
+    float p12 = m_SCEnergyConstants1.at(2);
 
-  float p20 = m_SCEnergyConstants1.at(3);
-  float p21 = m_SCEnergyConstants1.at(4);
-  float p22 = m_SCEnergyConstants1.at(5);
+    float p20 = m_SCEnergyConstants1.at(3);
+    float p21 = m_SCEnergyConstants1.at(4);
+    float p22 = m_SCEnergyConstants1.at(5);
 
-  float p30 = m_SCEnergyConstants1.at(6);
-  float p31 = m_SCEnergyConstants1.at(7);
-  float p32 = m_SCEnergyConstants1.at(8);
+    float p30 = m_SCEnergyConstants1.at(6);
+    float p31 = m_SCEnergyConstants1.at(7);
+    float p32 = m_SCEnergyConstants1.at(8);
 
-  //float k10 = m_SCEnergyConstants2.at(0);
-  //float k11 = m_SCEnergyConstants2.at(1);
-  //float k12 = m_SCEnergyConstants2.at(2);
+    if (m_cheating)
+        clusterEnergyEstimation = m_trueEnergy;
 
-  //float k20 = m_SCEnergyConstants2.at(3);
-  //float k21 = m_SCEnergyConstants2.at(4);
-  //float k22 = m_SCEnergyConstants2.at(5);
+    float p1 = p10 + p11*clusterEnergyEstimation + p12*clusterEnergyEstimation*clusterEnergyEstimation;
+    float p2 = p20 + p21*clusterEnergyEstimation + p22*clusterEnergyEstimation*clusterEnergyEstimation;
+    float p3 = p30/(p31 + exp(p32*clusterEnergyEstimation));
 
-  //float k30 = m_SCEnergyConstants2.at(6);
-  //float k31 = m_SCEnergyConstants2.at(7);
-  //float k32 = m_SCEnergyConstants2.at(8);
-
-  //int nHits = caloHitList.size();
-  //std::cout << "Number of hits in cluster = " << nHits << std::endl;
-
-  if (m_cheating)
-    clusterEnergyEstimation = m_trueEnergy;//Cheating 
-
-  float p1 = p10 + p11*clusterEnergyEstimation + p12*clusterEnergyEstimation*clusterEnergyEstimation;
-  float p2 = p20 + p21*clusterEnergyEstimation + p22*clusterEnergyEstimation*clusterEnergyEstimation;
-  float p3 = p30/(p31 + exp(p32*clusterEnergyEstimation));
-
-  //float k1 = k10 + k11*clusterEnergyEstimation + k12*clusterEnergyEstimation*clusterEnergyEstimation;
-  //float k2 = k20 + k21*clusterEnergyEstimation + k22*clusterEnergyEstimation*clusterEnergyEstimation;
-  //float k3 = k30/(k31 + exp(k32*clusterEnergyEstimation));
-
-  for(pandora::CaloHitList::const_iterator iter = caloHitList.begin() , endIter = caloHitList.end() ; endIter != iter ; ++iter)
+    for(pandora::CaloHitList::const_iterator iter = caloHitList.begin() , endIter = caloHitList.end() ; endIter != iter ; ++iter)
     {
         const pandora::CaloHit *pCaloHit = *iter;
-        //std::cout << "Calo Hit Energy: " << pCaloHit->GetInputEnergy() << std::endl;
-        //std::cout << "Calo Hit Type:   " << pCaloHit->GetHitType() << std::endl;
-
-	float hitEnergy = pCaloHit->GetHadronicEnergy();
-
-	float hitBinDensity(0.f);
-	this->FindDensity(pCaloHit,hitBinDensity);
-
-	double weight;
-	weight = p1*exp(p2*hitBinDensity) + p3;
-	
-	float hitEcorr = 0;
-	hitEcorr = hitEnergy*weight;//here I have to use clusterEnergy estimation
-
-	//std::cout << "hitEcorr " << hitEcorr << std::endl;
-	E_SC += hitEcorr;
+        const float hitEnergy = pCaloHit->GetHadronicEnergy();
+        float rho(0.f);
+        this->FindDensity(pCaloHit,rho);
+        double weight(p1*exp(p2*rho) + p3);
+        float hitEcorr(hitEnergy*weight);
+        E_SC += hitEcorr;
     }
 
     energyCorrection = E_SC;
-
-    std::cout << "Corrected energy with SC:     " << energyCorrection <<std::endl;
-
     return STATUS_CODE_SUCCESS;
 }
 
@@ -309,86 +338,47 @@ StatusCode EnergyCorrectionSC::SCClusterEnergyCorrectionFunction(float clusterEn
 
 StatusCode EnergyCorrectionSC::SCHCalECalSplitClusterEnergyCorrectionFunction(float clusterEnergyEstimation, const pandora::CaloHitList &caloHitList, float &energyCorrection) const
 {
-
     //std::cout << "========SPLIT CLUSTER========" << std::endl;
+    float E_SC(0.f);
 
-  float E_SC(0.f);
+    float p10 = m_SCEnergyConstants1.at(0);
+    float p11 = m_SCEnergyConstants1.at(1);
+    float p12 = m_SCEnergyConstants1.at(2);
 
-  //std::cout << "Energy correction for split clusters: clusterEnergyEstimation " << clusterEnergyEstimation << std::endl;
+    float p20 = m_SCEnergyConstants1.at(3);
+    float p21 = m_SCEnergyConstants1.at(4);
+    float p22 = m_SCEnergyConstants1.at(5);
 
-  float p10 = m_SCEnergyConstants1.at(0);
-  float p11 = m_SCEnergyConstants1.at(1);
-  float p12 = m_SCEnergyConstants1.at(2);
+    float p30 = m_SCEnergyConstants1.at(6);
+    float p31 = m_SCEnergyConstants1.at(7);
+    float p32 = m_SCEnergyConstants1.at(8);
 
-  float p20 = m_SCEnergyConstants1.at(3);
-  float p21 = m_SCEnergyConstants1.at(4);
-  float p22 = m_SCEnergyConstants1.at(5);
+    if (m_cheating)
+        clusterEnergyEstimation = m_trueEnergy;
 
-  float p30 = m_SCEnergyConstants1.at(6);
-  float p31 = m_SCEnergyConstants1.at(7);
-  float p32 = m_SCEnergyConstants1.at(8);
+    float p1 = p10 + p11*clusterEnergyEstimation + p12*clusterEnergyEstimation*clusterEnergyEstimation;
+    float p2 = p20 + p21*clusterEnergyEstimation + p22*clusterEnergyEstimation*clusterEnergyEstimation;
+    float p3 = p30/(p31 + exp(p32*clusterEnergyEstimation));
 
-  //float k10 = m_SCEnergyConstants2.at(0);
-  //float k11 = m_SCEnergyConstants2.at(1);
-  //float k12 = m_SCEnergyConstants2.at(2);
-
-  //float k20 = m_SCEnergyConstants2.at(3);
-  //float k21 = m_SCEnergyConstants2.at(4);
-  //float k22 = m_SCEnergyConstants2.at(5);
-
-  //float k30 = m_SCEnergyConstants2.at(6);
-  //float k31 = m_SCEnergyConstants2.at(7);
-  //float k32 = m_SCEnergyConstants2.at(8);
-
-  //int nHits = caloHitList.size();
-  //std::cout << "Number of hits in cluster = " << nHits << std::endl;
-
-  if (m_cheating)
-    clusterEnergyEstimation = m_trueEnergy;//Cheating 
-
-  float p1 = p10 + p11*clusterEnergyEstimation + p12*clusterEnergyEstimation*clusterEnergyEstimation;
-  float p2 = p20 + p21*clusterEnergyEstimation + p22*clusterEnergyEstimation*clusterEnergyEstimation;
-  float p3 = p30/(p31 + exp(p32*clusterEnergyEstimation));
-
-  //float k1 = k10 + k11*clusterEnergyEstimation + k12*clusterEnergyEstimation*clusterEnergyEstimation;
-  //float k2 = k20 + k21*clusterEnergyEstimation + k22*clusterEnergyEstimation*clusterEnergyEstimation;
-  //float k3 = k30/(k31 + exp(k32*clusterEnergyEstimation));
-
-  for(pandora::CaloHitList::const_iterator iter = caloHitList.begin() , endIter = caloHitList.end() ; endIter != iter ; ++iter)
+    for(pandora::CaloHitList::const_iterator iter = caloHitList.begin() , endIter = caloHitList.end() ; endIter != iter ; ++iter)
     {
-      const pandora::CaloHit *pCaloHit = *iter;
-      //std::cout << "Calo Hit Energy: " << pCaloHit->GetInputEnergy() << std::endl;
-      //std::cout << "Calo Hit Type:   " << pCaloHit->GetHitType() << std::endl;
+        const pandora::CaloHit *pCaloHit = *iter;
 
-	//If HCAL: correct
         if (HCAL == pCaloHit->GetHitType())
         {
-	  float hitEnergy = pCaloHit->GetHadronicEnergy();
-	  float hitBinDensity(0.f);
-	  this->FindDensity(pCaloHit,hitBinDensity);
-
-	  double weight;
-	  weight = p1*exp(p2*hitBinDensity) + p3;
-
-	  //std::cout << "weigth " << weight << std::endl;
-	  
-	  float hitEcorr = 0;
-	  hitEcorr = hitEnergy*weight;//here I have to use clusterEnergy estimation
-
-	  E_SC += hitEcorr;
+            const float hitEnergy = pCaloHit->GetHadronicEnergy();
+            float rho(0.f);
+            this->FindDensity(pCaloHit,rho);
+            double weight(p1*exp(p2*rho) + p3);
+            float hitEcorr(hitEnergy*weight);
+            E_SC += hitEcorr;
         }	
         else
         {           
 	  E_SC += pCaloHit->GetHadronicEnergy();
         }
     }
-
     energyCorrection = E_SC;
-
-    //std::cout << "The corrected hadronic energy for a cluster of threshold hits:" << std::endl;
-    //std::cout << "E_EM = " << E_EM << " E_HAD = " << E_HAD << " E_HAD_SC " << E_HAD_SC << std::endl;
-    //std::cout << "energyCorrection:     " << energyCorrection << std::endl;
-
     return STATUS_CODE_SUCCESS;
 }
 
@@ -408,32 +398,8 @@ StatusCode EnergyCorrectionSC::ReadSettings(const TiXmlHandle xmlHandle)
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
         "TrueEnergy", m_trueEnergy));
 
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "CutClusterHadEnergy", m_cutClusterHadEnergy));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle,
         "ClusterMinHadEnergy", m_clusterMinHadEnergy));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "CutNumberOfHitsInCluster", m_cutNumberOfHitsInCluster));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "MinNumberOfHitsInCluster", m_minNumberOfHitsInCluster));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "ApplyOnlyToTrackAssociatedClusters", m_applyOnlyToTrackAssociatedClusters));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "CutCglobal", m_cutCglobal));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "maxCglobal", m_maxCglobal));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "CutClusterTopologyVariable", m_cutClusterTopologyVariable));
-
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle,
-        "MinClusterTopologyVariable", m_minClusterTopologyVariable));
 
     return STATUS_CODE_SUCCESS;
 }

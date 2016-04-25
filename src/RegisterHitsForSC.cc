@@ -66,6 +66,7 @@ StatusCode RegisterHitsForSC::Run()
     std::vector<float> *m_CellSize1 = new std::vector<float>;
     std::vector<float> *m_CellThickness = new std::vector<float>;
     std::vector<float> *HitEnergies = new std::vector<float>;
+    std::vector<int> *hitType = new std::vector<int>;
 
     for (pandora::ClusterList::const_iterator clusterIter = pCurrentClusterList->begin(), clusterIterEnd = pCurrentClusterList->end(); clusterIter != clusterIterEnd; ++clusterIter)
     {
@@ -96,10 +97,25 @@ StatusCode RegisterHitsForSC::Run()
 	    m_CellSize1->push_back(pCaloHit->GetCellSize1());
 	    m_CellThickness->push_back(pCaloHit->GetCellThickness());
 
+
 	    HitEnergies->push_back(pCaloHit->GetHadronicEnergy());
+	    if (HCAL == pCaloHit->GetHitType())
+	      {
+		hitType->push_back(2);
+	      }
+	    
+	    else if (ECAL == pCaloHit->GetHitType())
+	      {
+		hitType->push_back(1);
+	      }
+	    
+	    else
+	      {
+		hitType->push_back(3);
+	      }
 	  }
 	
-
+	
         this->ClusterType(clusterCaloHitList,necalHits,nhcalHits);
 
         std::cout << "Number of hits in cluster : " << clusterCaloHitList.size() << std::endl;
@@ -134,6 +150,7 @@ StatusCode RegisterHitsForSC::Run()
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "HitEnergyTree", "CellSize1", m_CellSize1));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "HitEnergyTree", "CellThickness", m_CellThickness));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "HitEnergyTree", "HitEnergies", HitEnergies));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "HitEnergyTree", "HitType", hitType));
     //PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "HitEnergyTree", "ECalHitEnergies", ECalHitEnergies));
     //PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "HitEnergyTree", "HCalHitEnergies", HCalHitEnergies));
     PANDORA_MONITORING_API(FillTree(this->GetPandora(), "HitEnergyTree"));
